@@ -7,8 +7,14 @@ const axios = require('axios');
 const app = express();
 app.use(cors());
 
-// We use multer memory storage because SendGrid sends emails as multipart/form-data
-const upload = multer({ storage: multer.memoryStorage() });
+const iconv = require('iconv-lite');
+
+// We use multer memory storage. We set defCharset to 'latin1' to prevent busboy from 
+// corrupting non-UTF8 bytes (like ISO-8859-1 French characters) into question marks.
+const upload = multer({ 
+    storage: multer.memoryStorage(),
+    defCharset: 'latin1' 
+});
 
 // POST /api/incoming-email
 // SendGrid Inbound Parse will hit this endpoint when a tenant replies!
@@ -19,12 +25,28 @@ app.post('/api/incoming-email', upload.any(), async (req, res) => {
     // SendGrid puts the text fields in req.body and files in req.files
     const emailData = req.body; 
 
-    // Fix character encoding issues caused by multer defaulting to latin1 for fields
+    // Parse the charsets field provided by SendGrid
+    let charsets = {};
+    if (emailData.charsets) {
+        try {
+            charsets = JSON.parse(emailData.charsets);
+        } catch (e) {}
+    }
+
+    // Fix character encoding issues
     for (let key in emailData) {
-        if (typeof emailData[key] === 'string') {
+        if (typeof emailData[key] === 'string' && key !== 'charsets') {
+            const charset = (charsets[key] || 'utf-8').toLowerCase();
             try {
-                // SendGrid sends UTF-8 but multer/busboy reads it as latin1 without charset headers
-                emailData[key] = Buffer.from(emailData[key], 'latin1').toString('utf8');
+                // Since multer parsed it as latin1, we have the raw bytes intact.
+                const rawBytes = Buffer.from(emailData[key], 'latin1');
+                
+                // Decode using the exact charset SendGrid told us it was sent in
+                if (iconv.encodingExists(charset)) {
+                    emailData[key] = iconv.decode(rawBytes, charset);
+                } else {
+                    emailData[key] = iconv.decode(rawBytes, 'utf8');
+                }
             } catch (e) {
                 // Ignore conversion errors
             }
