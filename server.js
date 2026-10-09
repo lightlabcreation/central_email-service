@@ -18,6 +18,19 @@ app.post('/api/incoming-email', upload.any(), async (req, res) => {
 
     // SendGrid puts the text fields in req.body and files in req.files
     const emailData = req.body; 
+
+    // Fix character encoding issues caused by multer defaulting to latin1 for fields
+    for (let key in emailData) {
+        if (typeof emailData[key] === 'string') {
+            try {
+                // SendGrid sends UTF-8 but multer/busboy reads it as latin1 without charset headers
+                emailData[key] = Buffer.from(emailData[key], 'latin1').toString('utf8');
+            } catch (e) {
+                // Ignore conversion errors
+            }
+        }
+    }
+
     const toAddress = emailData.to || ''; // e.g. "reply+property1_tenant99@reply.campushabitations.com"
 
     console.log(`Received incoming email bound for: ${toAddress}`);
